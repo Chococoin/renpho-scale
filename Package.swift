@@ -33,6 +33,19 @@ let package = Package(
                     "-Xlinker", "Resources/Info.plist"
                 ])
             ]
+        ),
+        .executableTarget(
+            name: "renpho-scale",
+            dependencies: ["RenphoBLE"],
+            path: "Sources/renpho-scale",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Resources/Info.plist"
+                ])
+            ]
         )
     ]
 )
