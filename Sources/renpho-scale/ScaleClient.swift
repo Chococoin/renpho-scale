@@ -173,5 +173,108 @@ final class ScaleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         continuation = nil
     }
 
-    // MARK: - CBPeripheralDelegate (rest in Task 10)
+    // MARK: - CBPeripheralDelegate
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let services = peripheral.services else { return }
+
+        // Map service UUID → expected characteristics list
+        let charsForService: [CBUUID: [CBUUID]] = [
+            RenphoUUIDs.measurementService: [RenphoUUIDs.measurementChar],
+            RenphoUUIDs.dis: [
+                RenphoUUIDs.manufacturerName,
+                RenphoUUIDs.modelNumber,
+                RenphoUUIDs.serialNumber,
+                RenphoUUIDs.hardwareRevision,
+                RenphoUUIDs.firmwareRevision,
+                RenphoUUIDs.softwareRevision,
+                RenphoUUIDs.systemId
+            ],
+            RenphoUUIDs.battery: [RenphoUUIDs.batteryLevel]
+        ]
+
+        for service in services {
+            if let expected = charsForService[service.uuid] {
+                peripheral.discoverCharacteristics(expected, for: service)
+            }
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
+        guard let chars = service.characteristics else { return }
+
+        for char in chars {
+            // Subscribe a la char de measurement
+            if char.uuid == RenphoUUIDs.measurementChar {
+                peripheral.setNotifyValue(true, for: char)
+                continue
+            }
+
+            // Reads de metadata (DIS + Battery)
+            if let field = metadataField(for: char.uuid) {
+                pendingMetadataReads.insert(char.uuid)
+                peripheral.readValue(for: char)
+                _ = field   // referenced when the read returns
+            }
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        // Notification del char de measurement
+        if characteristic.uuid == RenphoUUIDs.measurementChar
+           && pendingMetadataReads.contains(characteristic.uuid) == false {
+            // Es notification — sólo emit si ya nos subscribimos (puede llegar valor inicial pre-subscribe)
+            if let value = characteristic.value, error == nil {
+                continuation?.yield(.rawNotification(value: value))
+            }
+            return
+        }
+
+        // Read response de metadata
+        if pendingMetadataReads.contains(characteristic.uuid),
+           let field = metadataField(for: characteristic.uuid) {
+            pendingMetadataReads.remove(characteristic.uuid)
+            if let error = error {
+                continuation?.yield(.metadataReadFailed(field: field, error: error))
+            } else if let value = characteristic.value {
+                continuation?.yield(.metadataRead(field: field, data: value))
+            }
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard characteristic.uuid == RenphoUUIDs.measurementChar else { return }
+        if error == nil && characteristic.isNotifying && !hasSubscribed {
+            hasSubscribed = true
+            continuation?.yield(.subscribed)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func metadataField(for uuid: CBUUID) -> MetadataField? {
+        switch uuid {
+        case RenphoUUIDs.manufacturerName: return .manufacturerName
+        case RenphoUUIDs.modelNumber:      return .modelNumber
+        case RenphoUUIDs.serialNumber:     return .serialNumber
+        case RenphoUUIDs.firmwareRevision: return .firmwareRevision
+        case RenphoUUIDs.hardwareRevision: return .hardwareRevision
+        case RenphoUUIDs.softwareRevision: return .softwareRevision
+        case RenphoUUIDs.systemId:         return .systemId
+        case RenphoUUIDs.batteryLevel:     return .batteryLevel
+        default:                            return nil
+        }
+    }
 }
