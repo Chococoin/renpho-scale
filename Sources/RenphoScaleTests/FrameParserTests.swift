@@ -56,4 +56,50 @@ final class FrameParserTests: XCTestCase {
             XCTAssertEqual(actual, 6)
         }
     }
+
+    // MARK: - Measurement frames
+
+    func test_measurementSinImpedancia() throws {
+        // 75.00 kg = 7500 = 0x1D4C (BE: 1d 4c)
+        // flags = 0x0000 → impedance debe ser nil
+        // CK byte arbitrario porque verifyChecksum=false
+        let bytes = Data(hex: "55aa14000700001d4c000099")!
+        let frame = try parser.parse(bytes)
+
+        guard case .measurement(let flags, let weight, let impedance) = frame else {
+            XCTFail("expected measurement, got \(frame)")
+            return
+        }
+        XCTAssertEqual(flags, 0x0000)
+        XCTAssertEqual(weight, 75.00, accuracy: 0.001)
+        XCTAssertNil(impedance)
+    }
+
+    func test_measurementConImpedancia() throws {
+        // 75.40 kg = 7540 = 0x1D74; impedancia 500 = 0x01F4; flags LE 01 00 = 0x0001
+        let bytes = Data(hex: "55aa14000701001d7401f499")!
+        let frame = try parser.parse(bytes)
+
+        guard case .measurement(let flags, let weight, let impedance) = frame else {
+            XCTFail("expected measurement, got \(frame)")
+            return
+        }
+        XCTAssertEqual(flags, 0x0001)
+        XCTAssertEqual(weight, 75.40, accuracy: 0.001)
+        XCTAssertEqual(impedance, 500)
+    }
+
+    // MARK: - Unknown type
+
+    func test_unknownType() {
+        // type 0x0099, len 0x01 (sólo cksum, sin datos útiles), 6 bytes total
+        let bytes = Data(hex: "55aa99000100")!
+        XCTAssertThrowsError(try parser.parse(bytes)) { error in
+            guard case .unknownType(let t) = error as? ParseError else {
+                XCTFail("expected unknownType, got \(error)")
+                return
+            }
+            XCTAssertEqual(t, 0x0099)
+        }
+    }
 }

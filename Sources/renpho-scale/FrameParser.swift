@@ -27,6 +27,22 @@ struct FrameParser {
         case 0x0011:
             // Idle: el primer byte de los datos útiles es el status
             return .idle(status: data[5])
+        case 0x0014:
+            // Datos útiles esperados: 6 bytes (FL FL WW WW II II), len=7 incluyendo cksum
+            // flags LE para que `& 1` matchee la convención bit-0 de la nota 1.1
+            let flags = UInt16(data[5]) | (UInt16(data[6]) << 8)
+            // Peso: BE
+            let weightRaw = (UInt16(data[7]) << 8) | UInt16(data[8])
+            let weight = Double(weightRaw) * 0.01
+            // Impedancia: BE, sólo si bit 0 está set
+            let impedance: UInt16?
+            if (flags & 1) == 1 {
+                let imp = (UInt16(data[9]) << 8) | UInt16(data[10])
+                impedance = imp
+            } else {
+                impedance = nil
+            }
+            return .measurement(flags: flags, weightKg: weight, impedanceOhms: impedance)
         default:
             throw ParseError.unknownType(type)
         }
