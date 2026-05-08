@@ -102,4 +102,38 @@ final class FrameParserTests: XCTestCase {
             XCTAssertEqual(t, 0x0099)
         }
     }
+
+    // MARK: - Checksum verification
+
+    /// Helper: parser con verificación habilitada (default real)
+    private var verifyingParser: FrameParser {
+        return FrameParser()  // verifyChecksum=true por default
+    }
+
+    func test_checksumValidoPasaConVerificacion() throws {
+        // Frame real de gatt.jsonl: idle pre-pesada, CK byte real (0x21 = SUM mod 256 of bytes 0..8)
+        let bytes = Data(hex: "55aa1100050101010921")!
+        let frame = try verifyingParser.parse(bytes)
+        XCTAssertEqual(frame, .idle(status: 0x01))
+    }
+
+    func test_checksumCorruptoLanzaBadChecksum() {
+        // Idle pre-pesada con el último byte alterado (de 0x21 a 0xff)
+        let bytes = Data(hex: "55aa11000501010109ff")!
+        XCTAssertThrowsError(try verifyingParser.parse(bytes)) { error in
+            guard case .badChecksum(let expected, let calculated) = error as? ParseError else {
+                XCTFail("expected badChecksum, got \(error)")
+                return
+            }
+            XCTAssertEqual(expected, 0xff)
+            XCTAssertEqual(calculated, 0x21)
+        }
+    }
+
+    func test_checksumCorruptoBypassConFlag() throws {
+        // Mismo frame corrupto, pero con verifyChecksum=false debe parsear OK
+        let bytes = Data(hex: "55aa11000501010109ff")!
+        let frame = try parser.parse(bytes)   // parser usa verifyChecksum=false
+        XCTAssertEqual(frame, .idle(status: 0x01))
+    }
 }
