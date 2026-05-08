@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import RenphoBLE
 
 /// Loggea ExplorerEvent a consola y opcionalmente a JSONL.
 /// Acumula contadores para el summary final.
@@ -86,7 +87,7 @@ final class EventLogger {
         case .serviceDiscovered(let uuid):
             return "[\(ts)] service \(uuid.uuidString.lowercased())"
         case .characteristicDiscovered(let svc, let char, let props):
-            return "[\(ts)]   char \(char.uuidString.lowercased()) [\(propsToString(props))] (svc \(svc.uuidString.lowercased()))"
+            return "[\(ts)]   char \(char.uuidString.lowercased()) [\(props.descriptors().joined(separator: ","))] (svc \(svc.uuidString.lowercased()))"
         case .readSucceeded(let char, let value):
             return "[\(ts)]   read \(char.uuidString.lowercased()) = \(consoleHex(value))"
         case .readFailed(let char, let error):
@@ -129,11 +130,11 @@ final class EventLogger {
             dict["type"] = "char_discovered"
             dict["service"] = svc.uuidString.lowercased()
             dict["char"] = char.uuidString.lowercased()
-            dict["props"] = propsToArray(props)
+            dict["props"] = props.descriptors()
         case .readSucceeded(let char, let value):
             dict["type"] = "read_ok"
             dict["char"] = char.uuidString.lowercased()
-            dict["value"] = hex(value)
+            dict["value"] = value.hex
         case .readFailed(let char, let error):
             dict["type"] = "read_failed"
             dict["char"] = char.uuidString.lowercased()
@@ -144,7 +145,7 @@ final class EventLogger {
         case .notification(let char, let value):
             dict["type"] = "notification"
             dict["char"] = char.uuidString.lowercased()
-            dict["value"] = hex(value)
+            dict["value"] = value.hex
         case .ready:
             dict["type"] = "ready"
         case .disconnected(let error):
@@ -179,36 +180,13 @@ final class EventLogger {
 
     // MARK: - Utils
 
-    private func hex(_ data: Data) -> String {
-        return data.map { String(format: "%02x", $0) }.joined()
-    }
-
     /// Hex con truncación cuando `--verbose` no está activo (más de 8 bytes → primeros 8 + "...").
-    /// JSONL siempre usa `hex(_:)` completo; esto solo se usa en console output.
+    /// JSONL siempre usa `data.hex` completo; esto solo se usa en console output.
     private func consoleHex(_ data: Data) -> String {
         if consoleVerbose || data.count <= 8 {
-            return hex(data)
+            return data.hex
         }
-        return hex(data.prefix(8)) + "..."
-    }
-
-    private func propsToString(_ props: CBCharacteristicProperties) -> String {
-        return propsToArray(props).joined(separator: ",")
-    }
-
-    private func propsToArray(_ props: CBCharacteristicProperties) -> [String] {
-        var out: [String] = []
-        if props.contains(.read) { out.append("read") }
-        if props.contains(.write) { out.append("write") }
-        if props.contains(.writeWithoutResponse) { out.append("writeWithoutResponse") }
-        if props.contains(.notify) { out.append("notify") }
-        if props.contains(.indicate) { out.append("indicate") }
-        if props.contains(.broadcast) { out.append("broadcast") }
-        if props.contains(.notifyEncryptionRequired) { out.append("notifyEncryptionRequired") }
-        if props.contains(.indicateEncryptionRequired) { out.append("indicateEncryptionRequired") }
-        if props.contains(.extendedProperties) { out.append("extendedProperties") }
-        if props.contains(.authenticatedSignedWrites) { out.append("authenticatedSignedWrites") }
-        return out
+        return data.prefix(8).hex + "..."
     }
 }
 
@@ -228,12 +206,4 @@ private enum ConsoleTime {
     static func string(from date: Date) -> String {
         return formatter.string(from: date)
     }
-}
-
-extension ISO8601DateFormatter {
-    static let fractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
 }

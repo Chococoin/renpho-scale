@@ -1,4 +1,5 @@
 import Foundation
+import RenphoBLE
 
 struct Args {
     var filter: String? = nil
@@ -85,13 +86,13 @@ do {
         scanTimeout: 15,
         connectTimeout: args.connectTimeout
     )
-} catch ExplorerError.bluetoothUnauthorized {
+} catch BLEPowerError.unauthorized {
     writeError("error: Bluetooth permission denied. Approve in System Settings → Privacy & Security → Bluetooth, then re-run.")
     exit(2)
-} catch ExplorerError.bluetoothPoweredOff {
+} catch BLEPowerError.poweredOff {
     writeError("error: Bluetooth is off. Please enable it.")
     exit(3)
-} catch ExplorerError.bluetoothUnsupported {
+} catch BLEPowerError.unsupported {
     writeError("error: Bluetooth not supported on this Mac.")
     exit(3)
 } catch ExplorerError.scanTimeoutNoMatch {

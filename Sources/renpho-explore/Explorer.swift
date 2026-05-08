@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import RenphoBLE
 
 // MARK: - Data types
 
@@ -19,9 +20,6 @@ enum ExplorerEvent {
 }
 
 enum ExplorerError: Error {
-    case bluetoothUnauthorized
-    case bluetoothPoweredOff
-    case bluetoothUnsupported
     case scanTimeoutNoMatch
     case connectFailed(Error?)
 }
@@ -139,13 +137,13 @@ final class BLEExplorer: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         case .poweredOn:
             cont.resume()
         case .unauthorized:
-            cont.resume(throwing: ExplorerError.bluetoothUnauthorized)
+            cont.resume(throwing: BLEPowerError.unauthorized)
         case .poweredOff:
-            cont.resume(throwing: ExplorerError.bluetoothPoweredOff)
+            cont.resume(throwing: BLEPowerError.poweredOff)
         case .unsupported:
-            cont.resume(throwing: ExplorerError.bluetoothUnsupported)
+            cont.resume(throwing: BLEPowerError.unsupported)
         default:
-            cont.resume(throwing: ExplorerError.bluetoothUnsupported)
+            cont.resume(throwing: BLEPowerError.unsupported)
         }
     }
 
