@@ -46,6 +46,11 @@ let package = Package(
                     "-Xlinker", "Resources/Info.plist"
                 ])
             ]
+        ),
+        .testTarget(
+            name: "RenphoScaleTests",
+            dependencies: ["renpho-scale", "RenphoBLE"],
+            path: "Sources/RenphoScaleTests"
         )
     ]
 )
