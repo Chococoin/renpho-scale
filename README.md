@@ -14,24 +14,25 @@ The work is split into incremental phases. Each phase produces a working artifac
 |-------|------|--------------|--------|
 | 1.0 | `renpho-recon` | Scans BLE advertisements, dumps frames with byte-diff highlighting to reverse-engineer the ad payload | ✅ Complete |
 | 1.1 | `renpho-explore` | Connects via GATT, discovers services + characteristics, subscribes to notifications, dumps everything | ✅ Complete |
-| 1.2 | `renpho-scale` (TBD) | Productive client: connects, parses weight + impedance from notifications, computes body composition, logs JSONL | 🚧 Not started |
+| 1.2 | `renpho-scale` | Productive client: connects, parses weight + impedance from notifications, logs JSONL. Body composition deferred to 1.3 | ✅ Complete |
 | 1.3 | — | Validate composition formulas vs official Renpho app | 🚧 Not started |
 
 ## Findings so far
 
 - The Elis 1C **does not** emit weight or impedance in BLE advertisements — those are constant for the lifetime of the device. The advertisement only carries a fixed manufacturer-data envelope with the device MAC.
 - All measurement data flows over **GATT** via a notify characteristic on a Renpho-proprietary service (`0x1A10`, char `0x2A10`). No write commands required — passive subscription is enough.
-- Frame format on the notify characteristic:
+- Frame format on the notify characteristic (validated empirically against a real measurement: 111.30 kg, 402 Ω):
   ```
-  55 aa  14 00  07  FL FL  WW WW  II II  CK
+  55 aa  14 00  07  FL FL  RR  WW WW  II II  CK
   ```
   - `55 aa` = sync header
-  - `14 00` = message type 0x0014 (measurement)
-  - `07` = payload length
-  - `FL FL` = flags (byte 0 bit 0 set when impedance is ready)
+  - `14 00` = message type 0x0014 measurement (LE), or `11 00` = 0x0011 idle
+  - `07` = payload length (counts the 7 useful bytes; total frame size is `5 + len + 1` = 13 bytes)
+  - `FL FL` = flags, **little-endian** (byte 0 bit 0 set when impedance is ready, e.g. `01 00` = 0x0001)
+  - `RR` = reserved (always `00` in observed frames)
   - `WW WW` = weight, big-endian, factor `0.01 kg` (10 g resolution)
-  - `II II` = impedance, big-endian, ohms (zero until flag fires)
-  - `CK` = checksum (algorithm TBD in 1.2)
+  - `II II` = impedance, big-endian, ohms (zero until the flag fires)
+  - `CK` = checksum: `SUM mod 256` of all preceding bytes (sync + type + len + payload)
 - Standard services exposed too: Device Information (`0x180A`), Battery (`0x180F`), and Nordic DFU (`0xFE59`) — readable values like manufacturer name (`"LeFu Scale"`), model (`"38400"`), firmware revision, battery level, and the raw MAC.
 
 Full notes: see `docs/superpowers/notes/`.
@@ -40,18 +41,25 @@ Full notes: see `docs/superpowers/notes/`.
 
 ```
 renpho-scale/
-├── Package.swift                                # 2 executable targets, no external deps
+├── Package.swift                                # library + 3 executables + 1 test target, no external deps
 ├── Resources/Info.plist                         # NSBluetoothAlwaysUsageDescription, embedded via linker flag
 ├── Sources/
+│   ├── RenphoBLE/                               # Internal library — shared BLE utilities
+│   │   ├── Hex.swift                            # Data ↔ hex string
+│   │   ├── ISO8601+Fractional.swift             # UTC formatter with ms
+│   │   ├── CBProperties+Strings.swift           # CBCharacteristicProperties pretty-print
+│   │   ├── RenphoUUIDs.swift                    # Service / characteristic constants
+│   │   └── BLEErrors.swift                      # Common power-state + scan-timeout errors
 │   ├── renpho-recon/                            # Phase 1.0 — advertisement-level recon
-│   │   ├── main.swift
-│   │   ├── Scanner.swift                        # BLEScanner exposing AsyncStream<AdvertisementFrame>
-│   │   ├── Formatter.swift                      # ANSI byte-diff console formatter
-│   │   └── Recorder.swift                       # JSONL append
-│   └── renpho-explore/                          # Phase 1.1 — GATT recon
-│       ├── main.swift
-│       ├── Explorer.swift                       # BLEExplorer: scan, connect, discover, read, subscribe
-│       └── EventLogger.swift                    # Console + JSONL + summary
+│   ├── renpho-explore/                          # Phase 1.1 — GATT recon
+│   ├── renpho-scale/                            # Phase 1.2 — productive client
+│   │   ├── main.swift                           # CLI parsing, watchdog, exit codes, two modes
+│   │   ├── ScaleClient.swift                    # Focused BLE delegate: scan→connect→subscribe
+│   │   ├── FrameParser.swift                    # `55 aa…` decoder + checksum verify
+│   │   ├── ChecksumProbe.swift                  # `--probe-checksum` mode: identify algorithm
+│   │   ├── Measurement.swift                    # Frame, MeasurementComplete, ParseError types
+│   │   └── EventLogger.swift                    # Console + JSONL + parser inline
+│   └── RenphoScaleTests/                        # XCTest target — 12 tests on FrameParser
 └── docs/superpowers/
     ├── specs/                                   # Design docs
     ├── plans/                                   # Implementation plans (task-by-task)
@@ -101,7 +109,17 @@ swift run renpho-explore --filter "R-A033" --duration 90 --verbose --out gatt.js
 
 Step on the scale when you see `--- Listening for notifications ---` in the output. The session captures the full GATT tree plus all notifications during your weighing, then exits when the scale auto-disconnects (~30 s after the impedance reading).
 
-Both tools accept `--help` for full flag reference.
+### Phase 1.2 — productive measurement
+
+```sh
+swift run renpho-scale --filter "R-A033" --out medida.jsonl --verbose
+```
+
+Step **barefoot** on the scale when you see `subscribed — subite a la balanza` in the output. The binary streams the live weight, waits for the impedance frame, prints a `--- Resultado ---` block, and exits cleanly. The `medida.jsonl` file captures every event (lifecycle + per-frame parse + final `measurement_complete`) for later analysis.
+
+The same binary has a `--probe-checksum <jsonl-path>` sub-mode that re-identifies the checksum algorithm from any captured JSONL — useful if a future firmware revision changes the frame format.
+
+All three tools accept `--help` for the full flag reference.
 
 ## Caveats
 
@@ -112,7 +130,7 @@ Both tools accept `--help` for full flag reference.
 
 ## References
 
-- [openScale](https://github.com/oliexdev/openScale) — open-source Android app with reverse-engineered parsers for many smart scales, including several Renpho models. Useful reference when porting body-composition formulas in Phase 1.2.
+- [openScale](https://github.com/oliexdev/openScale) — open-source Android app with reverse-engineered parsers for many smart scales, including several Renpho models. Useful reference when porting body-composition formulas in Phase 1.3.
 - [Apple CoreBluetooth documentation](https://developer.apple.com/documentation/corebluetooth)
 
 ## License
