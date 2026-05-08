@@ -5,6 +5,10 @@ let package = Package(
     name: "renpho-scale",
     platforms: [.macOS(.v11)],
     targets: [
+        .target(
+            name: "RenphoBLE",
+            path: "Sources/RenphoBLE"
+        ),
         .executableTarget(
             name: "renpho-recon",
             path: "Sources/renpho-recon",
@@ -19,6 +23,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "renpho-explore",
+            dependencies: ["RenphoBLE"],
             path: "Sources/renpho-explore",
             linkerSettings: [
                 .unsafeFlags([
